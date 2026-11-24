@@ -1,0 +1,13 @@
+# SEGREDOS: nunca versionar
+firmware/silo_graos/config.h
+*.env
+.DS_Store
+
+# print que mostra chaves (nao entregar)
+docs/prints/*NAO_ENTREGAR*
+
+# prints descartados
+docs/prints/p02_ANTIGO*
+docs/prints/confirmando-queda.png
+# arquivos temporarios do Word
+~$*

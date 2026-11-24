@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "author": "Silo de Graos - Trabalho N2",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht", "top": -86, "left": 190, "attrs": { "temperature": "25", "humidity": "60" } },
+    { "type": "wokwi-relay-module", "id": "rele", "top": 150, "left": 200, "attrs": {} },
+    { "type": "wokwi-led", "id": "vent", "top": 120, "left": 380, "attrs": { "color": "blue", "label": "VENTILADOR" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 210, "left": 370, "rotate": 90, "attrs": { "value": "220" } },
+    { "type": "wokwi-potentiometer", "id": "bat", "top": -90, "left": -150, "attrs": { "label": "BATERIA" } },
+    { "type": "wokwi-slide-switch", "id": "semnet", "top": 140, "left": -130, "attrs": { "label": "SEM INTERNET" } }
+  ],
+  "connections": [
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "dht:VCC", "esp:3V3", "red", [] ],
+    [ "dht:GND", "esp:GND.1", "black", [] ],
+    [ "dht:SDA", "esp:D4", "green", [] ],
+    [ "rele:VCC", "esp:VIN", "red", [] ],
+    [ "rele:GND", "esp:GND.1", "black", [] ],
+    [ "rele:IN", "esp:D26", "orange", [] ],
+    [ "rele:COM", "esp:VIN", "red", [] ],
+    [ "rele:NO", "vent:A", "blue", [] ],
+    [ "vent:C", "r1:1", "blue", [] ],
+    [ "r1:2", "esp:GND.1", "black", [] ],
+    [ "bat:GND", "esp:3V3", "red", [] ],
+    [ "bat:VCC", "esp:GND.2", "black", [] ],
+    [ "bat:SIG", "esp:D34", "purple", [] ],
+    [ "semnet:2", "esp:D27", "gray", [] ],
+    [ "semnet:3", "esp:GND.2", "black", [] ]
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel do Silo de Grãos</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; background:#0f172a; color:#e2e8f0; }
+  header { background:#1e293b; padding:14px 20px; border-bottom:3px solid #ca8a04; }
+  h1 { margin:0; font-size:20px; letter-spacing:1px; text-transform:uppercase; }
+  h2 { margin:0 0 6px; font-size:14px; text-transform:uppercase; letter-spacing:1px; color:#fde68a; }
+  .sub { color:#94a3b8; font-size:12px; margin:0 0 10px; }
+  .barra { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; font-size:13px; }
+  input, button { font-size:14px; padding:7px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; }
+  input.chave { font-family:ui-monospace,Consolas,monospace; width:100%; }
+  button { cursor:pointer; background:#2563eb; border-color:#2563eb; font-weight:600; }
+  button.verde { background:#15803d; border-color:#15803d; }
+  button.cinza { background:#334155; border-color:#334155; }
+  button.perigo { background:#9a3412; border-color:#9a3412; }
+  main { padding:16px; max-width:1200px; margin:0 auto; display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } }
+  .card { background:#1e293b; border-radius:12px; padding:14px; min-width:0; }
+  .l2 { grid-column: span 2; } .l3 { grid-column: 1 / -1; }
+  @media (max-width: 900px) { .l2, .l3 { grid-column:auto; } }
+  .vals { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .val { background:#0f172a; border-radius:8px; padding:10px; text-align:center; }
+  .val .rot { font-size:11px; color:#94a3b8; text-transform:uppercase; }
+  .val .num { font-size:24px; font-weight:700; }
+  .st { padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; display:inline-block; }
+  .on { background:#166534; color:#dcfce7; } .off { background:#7f1d1d; color:#fee2e2; }
+  .dorm { background:#1e3a8a; color:#dbeafe; } .pend { background:#854d0e; color:#fef9c3; }
+  .log { background:#020617; border-radius:8px; padding:8px; height:180px; overflow:auto; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  .log div { padding:3px 0; border-bottom:1px solid #0f172a; word-break:break-all; }
+  .ok { color:#86efac; } .erro { color:#fca5a5; } .aviso { color:#fde047; }
+  label { font-size:12px; color:#94a3b8; display:block; margin:8px 0 4px; }
+  .linha { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { padding:5px 6px; border-bottom:1px solid #334155; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  .tabela { max-height:260px; overflow:auto; }
+  code { background:#0f172a; padding:1px 5px; border-radius:4px; }
+  #cmdStatus { margin-top:10px; padding:10px; border-radius:8px; background:#0f172a; font-size:13px; min-height:40px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌾 Painel do Silo de Grãos</h1>
+  <div class="barra">
+    sis1a/ <input id="grupo" value="marcelo" size="9"> / <input id="local" value="silo1" size="6"> /
+    Worker: <input id="worker" placeholder="https://silo-graos.SEU-USUARIO.workers.dev" size="38">
+    <button id="conectar">Conectar</button>
+    <span id="stMqtt" class="st off">MQTT desconectado</span>
+  </div>
+</header>
+
+<main>
+  <!-- ===================== ESTADO ===================== -->
+  <section class="card">
+    <h2>Estado do ESP32</h2>
+    <p class="sub">Tópico <code id="tEstado">…/estado</code> (retido)</p>
+    <div><span id="stEsp" class="st off">sem notícia</span></div>
+    <p id="acorda" class="sub" style="margin-top:8px">—</p>
+    <div class="vals">
+      <div class="val"><div class="rot">Ventilador</div><div class="num" id="vVent">--</div></div>
+      <div class="val"><div class="rot">Modo</div><div class="num" id="vModo">--</div></div>
+      <div class="val"><div class="rot">Bateria</div><div class="num" id="vBat">--</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Última leitura</h2>
+    <p class="sub">Tópico <code id="tTelem">…/telemetria</code></p>
+    <div class="vals">
+      <div class="val"><div class="rot">Temp</div><div class="num" id="vTemp">--</div></div>
+      <div class="val"><div class="rot">Umidade</div><div class="num" id="vUmid">--</div></div>
+      <div class="val"><div class="rot">Ciclo</div><div class="num" id="vCiclo">--</div></div>
+    </div>
+    <p class="sub" style="margin-top:8px">Motivo da decisão: <b id="vMotivo">—</b></p>
+    <p class="sub" id="vHora">—</p>
+  </section>
+
+  <!-- ===================== COMANDO ===================== -->
+  <section class="card">
+    <h2>Comando remoto (assinado)</h2>
+    <p class="sub">Publica <b>retido</b> em <code id="tCmd">…/comando</code>: <code>comando|ts|HMAC</code></p>
+    <label for="chaveHmac">Chave HMAC (a mesma do config.h; não fica salva)</label>
+    <input id="chaveHmac" type="password" autocomplete="off" class="chave" placeholder="cole a CHAVE_HMAC">
+    <div class="linha">
+      <button data-cmd="vent:ON" class="verde">Ligar ventilador</button>
+      <button data-cmd="vent:OFF" class="cinza">Desligar</button>
+      <button data-cmd="modo:AUTO">Automático</button>
+    </div>
+    <div class="linha">
+      <label style="margin:0"><input type="checkbox" id="assinar" checked> assinar</label>
+      <button id="replay" class="perigo">Reenviar o último (replay)</button>
+    </div>
+    <div id="cmdStatus">Nenhum comando enviado.</div>
+  </section>
+
+  <!-- ===================== GRÁFICO ===================== -->
+  <section class="card l2">
+    <h2>Histórico (D1 · <code>/historico</code>)</h2>
+    <p class="sub">Últimas <input id="horas" value="24" size="3"> h · atualiza sozinho a cada 60 s e a cada nova telemetria · <span id="stHist">—</span></p>
+    <div class="linha" style="margin-top:0">
+      <label style="margin:0" title="Quando o ESP32 não consegue HTTPS, ele publica o lote JÁ ASSINADO em …/ponte e o painel repassa ao Worker.">
+        <input type="checkbox" id="ponteAtiva" checked> ponte do histórico (plano B)</label>
+      <input id="apiKey" type="password" autocomplete="off" class="chave" style="width:260px" placeholder="API_KEY (não fica salva)">
+      <span id="stPonte" class="sub" style="margin:0">—</span>
+    </div>
+    <div style="position:relative; height:280px"><canvas id="grafico"></canvas></div>
+  </section>
+
+  <!-- ===================== ALERTAS ===================== -->
+  <section class="card">
+    <h2>Alertas</h2>
+    <p class="sub">Tópico <code id="tAlerta">…/alerta</code> · cooldown no ESP32 (2 min no demo, 30 min no produto)</p>
+    <div class="log" id="alertas" style="height:250px"></div>
+  </section>
+
+  <!-- ===================== RESUMO ===================== -->
+  <section class="card l2">
+    <h2>Resumo por hora (D1 · <code>/resumo</code>)</h2>
+    <p class="sub">Em cada hora: temperatura máxima e média, umidade média e % do tempo com o ventilador ligado.</p>
+    <div class="tabela"><table>
+      <thead><tr><th>Hora</th><th>Temp máx (°C)</th><th>Temp média (°C)</th><th>Umid média (%)</th><th>Ventilador ligado</th><th>Leituras</th></tr></thead>
+      <tbody id="resumo"><tr><td colspan="6">—</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>Mensagens MQTT</h2>
+    <p class="sub">Tudo que chega em <code id="tTudo">…/#</code></p>
+    <div class="log" id="log" style="height:250px"></div>
+  </section>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const enc = new TextEncoder();
+  const base = () => `sis1a/${$("grupo").value.trim()}/${$("local").value.trim()}/`;
+  const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const hora = ts => new Date(ts * 1000).toLocaleTimeString("pt-BR");
+  const agoraS = () => Math.floor(Date.now() / 1000);
+
+  // Lembra só o que não é segredo (a chave HMAC nunca é salva)
+  try {
+    for (const k of ["grupo", "local", "worker"]) { const v = localStorage.getItem("silo_" + k); if (v) $(k).value = v; }
+  } catch (e) {}
+  function salvar() { try { for (const k of ["grupo", "local", "worker"]) localStorage.setItem("silo_" + k, $(k).value.trim()); } catch (e) {} }
+
+  function escrever(alvo, html) {
+    const d = document.createElement("div");
+    d.innerHTML = `<span style="color:#64748b">${new Date().toLocaleTimeString("pt-BR")}</span> ` + html;
+    $(alvo).prepend(d);
+    while ($(alvo).children.length > 200) $(alvo).lastChild.remove();
+  }
+
+  function atualizarTopicos() {
+    $("tEstado").textContent = base() + "estado";
+    $("tTelem").textContent = base() + "telemetria";
+    $("tCmd").textContent = base() + "comando";
+    $("tAlerta").textContent = base() + "alerta";
+    $("tTudo").textContent = base() + "#";
+  }
+
+  // ================== HMAC (mesma conta do ESP32 e do Worker) ==================
+  async function hmacHex(chave, msg) {
+    const k = await crypto.subtle.importKey("raw", enc.encode(chave), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const mac = await crypto.subtle.sign("HMAC", k, enc.encode(msg));
+    return [...new Uint8Array(mac)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // ================== Estado do ESP32 ==================
+  let estado = { status: "?", acorda_em: 0 };
+  function mostrarEstado() {
+    const e = estado, el = $("stEsp");
+    if (e.status === "online")        { el.textContent = "ONLINE (acordado)"; el.className = "st on"; $("acorda").textContent = "Recebe comandos agora."; }
+    else if (e.status === "dormindo") {
+      el.textContent = "DORMINDO (deep sleep)"; el.className = "st dorm";
+      const falta = e.acorda_em - agoraS();
+      $("acorda").innerHTML = e.acorda_em
+        ? (falta > 0 ? `Acorda às <b>${hora(e.acorda_em)}</b> (em ~${falta} s). Comando enviado agora fica <b>retido</b> no broker até lá.`
+                     : `Deveria ter acordado às ${hora(e.acorda_em)} (há ${-falta} s). <span class="aviso">Atrasado?</span>`)
+        : "Hora de acordar desconhecida.";
+    }
+    else if (e.status === "offline")  { el.textContent = "OFFLINE (caiu sem avisar)"; el.className = "st off"; $("acorda").textContent = "O broker publicou o 'testamento' (LWT) do ESP32."; }
+    if (e.ventilador) $("vVent").innerHTML = e.ventilador === "ligado" ? '<span class="ok">ON</span>' : "OFF";
+    if (e.modo) $("vModo").textContent = e.modo.toUpperCase();
+  }
+  setInterval(() => { mostrarEstado(); verificarTimeout(); }, 1000);
+
+  // ================== Comando com confirmação (ack) ==================
+  let pendente = null, ultimoComando = null;
+  function prazoAck() {
+    // Online: 15 s. Dormindo: até ele acordar + 60 s (tempo de conectar e processar).
+    if (estado.status === "dormindo" && estado.acorda_em) return Math.max(estado.acorda_em - agoraS(), 0) + 60;
+    return 15;
+  }
+  function verificarTimeout() {
+    if (!pendente) return;
+    const restante = pendente.limite - agoraS();
+    if (restante <= 0) {
+      $("cmdStatus").innerHTML = `<span class="erro">⚠ SEM CONFIRMAÇÃO</span> de <b>${esc(pendente.cmd)}</b> — o ESP32 não respondeu no prazo. O comando <b>não</b> está executado. (Ele continua retido no broker.)`;
+      pendente = null;
+    } else {
+      $("cmdStatus").innerHTML = `<span class="st pend">AGUARDANDO</span> <b>${esc(pendente.cmd)}</b> enviado às ${hora(pendente.ts)} — ` +
+        (estado.status === "dormindo" ? "ESP32 dormindo, será executado quando acordar" : "esperando o ack") + ` (desisto em ${restante} s)`;
+    }
+  }
+
+  async function enviar(cmd) {
+    if (!client || !client.connected) return alert("Conecte primeiro.");
+    const ts = agoraS();
+    const chave = $("chaveHmac").value;
+    if ($("assinar").checked && !chave) return alert("Cole a chave HMAC.");
+    const msg = $("assinar").checked ? `${cmd}|${ts}|${await hmacHex(chave, cmd + "|" + ts)}` : cmd;
+    ultimoComando = msg;
+    client.publish(base() + "comando", msg, { qos: 1, retain: true });
+    pendente = { cmd, ts, limite: ts + prazoAck() };
+    escrever("log", `<span class="aviso">→ comando</span> ${esc(msg)}`);
+    verificarTimeout();
+  }
+  document.querySelectorAll("[data-cmd]").forEach(b => b.onclick = () => enviar(b.dataset.cmd));
+  $("replay").onclick = () => {
+    if (!client || !client.connected || !ultimoComando) return alert("Mande um comando antes.");
+    client.publish(base() + "comando", ultimoComando, { qos: 1, retain: true });
+    const p = ultimoComando.split("|");
+    pendente = { cmd: p[0] + " (REPLAY)", ts: Number(p[1]) || agoraS(), limite: agoraS() + prazoAck() };
+    escrever("log", `<span class="erro">→ REENVIADO igualzinho</span> ${esc(ultimoComando)}`);
+  };
+
+  function aoAck(a) {
+    const ok = String(a.resultado).startsWith("OK");
+    $("cmdStatus").innerHTML = ok
+      ? `<span class="st on">✔ EXECUTADO</span> ${esc(a.resultado)} — confirmado pelo ESP32 às ${hora(a.ts)}`
+      : `<span class="st off">✘ RECUSADO</span> ${esc(a.resultado)} (${esc(a.cmd)})`;
+    pendente = null;
+    if (a.ventilador) estado.ventilador = a.ventilador;
+    if (a.modo) estado.modo = a.modo;
+    mostrarEstado();
+  }
+
+  // ================== Alertas ==================
+  function aoAlerta(a) {
+    escrever("alertas", `<span class="erro">⚠ ${esc(a.tipo)}</span> ${esc(a.msg)} <span style="color:#64748b">(ESP32 ${hora(a.ts)})</span>`);
+    try { // bipe curto
+      const ctx = new AudioContext(), o = ctx.createOscillator();
+      o.connect(ctx.destination); o.frequency.value = 880; o.start(); o.stop(ctx.currentTime + 0.25);
+    } catch (e) {}
+  }
+
+  // ================== MQTT (WebSocket com TLS) ==================
+  let client = null;
+  $("conectar").onclick = () => {
+    salvar(); atualizarTopicos();
+    if (client) client.end(true);
+    client = mqtt.connect("wss://test.mosquitto.org:8081/mqtt", { clientId: "painel-" + Math.random().toString(16).slice(2, 8) });
+    client.on("connect", () => {
+      $("stMqtt").textContent = "MQTT conectado (wss/TLS)"; $("stMqtt").className = "st on";
+      client.subscribe(base() + "#", { qos: 1 });
+      escrever("log", `<b>conectado</b>, assinando ${esc(base())}#`);
+    });
+    client.on("close", () => { $("stMqtt").textContent = "MQTT desconectado"; $("stMqtt").className = "st off"; });
+    client.on("message", (topico, payload, pacote) => {
+      const texto = payload.toString();
+      escrever("log", `${pacote.retain ? "[retido] " : ""}<span style="color:#93c5fd">${esc(topico.replace(base(), "…/"))}</span> ${esc(texto)}`);
+      if (!texto) return;
+      const sufixo = topico.slice(base().length);
+      if (sufixo === "ponte") { repassarPonte(texto); return; }
+      let d; try { d = JSON.parse(texto); } catch (e) { return; }
+      if (sufixo === "estado") { estado = { ...estado, ...d }; mostrarEstado(); verificarTimeout(); }
+      if (sufixo === "ack") aoAck(d);
+      if (sufixo === "alerta" && !pacote.retain) aoAlerta(d);
+      if (sufixo === "telemetria") {
+        $("vTemp").textContent = d.temp_c == null ? "falha" : d.temp_c + "°";
+        $("vUmid").textContent = d.umid_pct == null ? "falha" : d.umid_pct + "%";
+        $("vCiclo").textContent = d.ciclo;
+        $("vBat").textContent = d.bateria_pct + "%";
+        $("vMotivo").textContent = d.motivo;
+        $("vHora").textContent = `Leitura das ${hora(d.ts)} · ${d.pendentes} leitura(s) no buffer do ESP32`;
+        estado.ventilador = d.ventilador; estado.modo = d.modo; mostrarEstado();
+        setTimeout(carregarHistorico, 20000);  // dá tempo do ESP32 gravar no Worker
+      }
+    });
+    carregarHistorico();
+  };
+
+  // ================== Ponte do histórico (plano B) ==================
+  // O ESP32 publica "<assinatura>\n<corpo>". O painel repassa SEM MEXER no corpo:
+  // se mudar 1 byte, o HMAC não confere e o Worker recusa (401).
+  async function repassarPonte(texto) {
+    const i = texto.indexOf("\n");
+    if (i !== 64) return escrever("log", `<span class="erro">ponte: mensagem em formato inválido</span>`);
+    const assinatura = texto.slice(0, i), corpo = texto.slice(i + 1);
+    const url = $("worker").value.trim().replace(/\/$/, ""), chave = $("apiKey").value.trim();
+    if (!$("ponteAtiva").checked) return;
+    if (!url || !chave) { $("stPonte").innerHTML = `<span class="aviso">lote chegou, mas falta a URL do Worker ou a API key</span>`; return; }
+    let ts; try { ts = JSON.parse(corpo).ts; } catch (e) { return; }
+    try {
+      const r = await fetch(url + "/insert", {
+        method: "POST", body: corpo,
+        headers: { "Content-Type": "application/json", "X-API-Key": chave, "X-Assinatura": assinatura },
+      });
+      const resp = await r.text();
+      if (r.ok) {
+        client.publish(base() + "ponte_ok", JSON.stringify({ ts, ok: true }), { qos: 1 });
+        $("stPonte").innerHTML = `<span class="ok">✔ ${esc(resp)}</span> às ${new Date().toLocaleTimeString("pt-BR")}`;
+        escrever("log", `<span class="ok">ponte → Worker ${r.status}</span> ${esc(resp)}`);
+        setTimeout(carregarHistorico, 1000);
+      } else {
+        $("stPonte").innerHTML = `<span class="erro">✘ Worker ${r.status}: ${esc(resp)}</span>`;
+        escrever("log", `<span class="erro">ponte → Worker ${r.status}</span> ${esc(resp)}`);
+      }
+    } catch (e) {
+      $("stPonte").innerHTML = `<span class="erro">✘ ${esc(e.message)}</span>`;
+    }
+  }
+
+  // ================== Histórico e resumo (HTTP no Worker) ==================
+  let grafico = null;
+  async function carregarHistorico() {
+    const url = $("worker").value.trim().replace(/\/$/, "");
+    if (!url) { $("stHist").textContent = "preencha a URL do Worker"; return; }
+    const h = parseInt($("horas").value, 10) || 24, loc = encodeURIComponent($("local").value.trim());
+    try {
+      const [hist, res] = await Promise.all([
+        fetch(`${url}/historico?horas=${h}&local=${loc}`).then(r => r.json()),
+        fetch(`${url}/resumo?horas=${h}&local=${loc}`).then(r => r.json()),
+      ]);
+      desenhar(hist);
+      $("resumo").innerHTML = res.length ? res.slice().reverse().map(r =>
+        `<tr><td>${esc(r.hora)}</td><td>${r.temp_max_c}</td><td>${r.temp_media_c}</td><td>${r.umid_media_pct}</td><td>${r.vent_ligado_pct}%</td><td>${r.leituras}</td></tr>`).join("")
+        : `<tr><td colspan="6">sem dados nesse período</td></tr>`;
+      $("stHist").innerHTML = `<span class="ok">${hist.length} leituras</span> · atualizado ${new Date().toLocaleTimeString("pt-BR")}`;
+    } catch (e) {
+      $("stHist").innerHTML = `<span class="erro">erro ao buscar: ${esc(e.message)}</span>`;
+    }
+  }
+  function desenhar(hist) {
+    const dados = {
+      labels: hist.map(r => hora(r.ts)),
+      datasets: [
+        { label: "Temperatura (°C)", data: hist.map(r => r.temp_c), borderColor: "#f97316", yAxisID: "y", tension: .2, pointRadius: 1 },
+        { label: "Umidade (%)", data: hist.map(r => r.umid_pct), borderColor: "#38bdf8", yAxisID: "y1", tension: .2, pointRadius: 1 },
+        { label: "Ventilador ligado", data: hist.map(r => r.ventilador ? 100 : 0), borderColor: "#22c55e",
+          backgroundColor: "rgba(34,197,94,.15)", fill: true, stepped: true, yAxisID: "y1", pointRadius: 0 },
+      ],
+    };
+    if (grafico) { grafico.data = dados; grafico.update(); return; }
+    grafico = new Chart($("grafico"), {
+      type: "line", data: dados,
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        scales: {
+          x: { ticks: { color: "#94a3b8", maxTicksLimit: 10 }, grid: { color: "#1e293b" } },
+          y: { position: "left", title: { display: true, text: "°C", color: "#f97316" }, ticks: { color: "#94a3b8" }, grid: { color: "#334155" } },
+          y1: { position: "right", min: 0, max: 100, title: { display: true, text: "%", color: "#38bdf8" }, ticks: { color: "#94a3b8" }, grid: { display: false } },
+        },
+        plugins: { legend: { labels: { color: "#e2e8f0" } } },
+      },
+    });
+  }
+  setInterval(carregarHistorico, 60000);
+  $("horas").addEventListener("change", carregarHistorico);
+  ["grupo", "local"].forEach(id => $(id).addEventListener("input", atualizarTopicos));
+  atualizarTopicos();
+</script>
+</body>
+</html>
